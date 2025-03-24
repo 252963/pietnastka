@@ -1,0 +1,2 @@
+# pietnastka
+program rozwiazujacy pietnastke
