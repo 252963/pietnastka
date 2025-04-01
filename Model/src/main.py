@@ -3,19 +3,20 @@ import heapq
 import time
 
 MOVES = {
-    'L': (0, -1),  # lewo
-    'R': (0, 1),   # prawo
-    'U': (-1, 0),  # góra
-    'D': (1, 0),   # dół
+    'L': (0, -1),
+    'R': (0, 1),
+    'U': (-1, 0),
+    'D': (1, 0),
 }
 
 rows, cols = 4, 4
+MAX_DEPTH = 20
 
 start_board = [
-    [1, 2, 7, 0],
-    [8, 9, 12, 10],
-    [13, 3, 6, 4],
-    [14, 4, 15, 5],
+    [1, 2, 3, 4],
+    [5, 7, 8, 12],
+    [9, 6, 10, 0],
+    [13, 14, 11, 15],
 ]
 
 goal_board = [
@@ -40,20 +41,6 @@ def swap(flat, i, j):
     lst = list(flat)
     lst[i], lst[j] = lst[j], lst[i]
     return tuple(lst)
-
-def hamming_distance(state, goal):
-    return sum(1 for i in range(len(state)) if state[i] != goal[i] and state[i] != 0)
-
-def manhattan_distance(state, goal):
-    total = 0
-    for i, val in enumerate(state):
-        if val == 0:
-            continue
-        goal_index = goal.index(val)
-        x1, y1 = divmod(i, cols)
-        x2, y2 = divmod(goal_index, cols)
-        total += abs(x1 - x2) + abs(y1 - y2)
-    return total
 
 def bfs(start_board, goal_board):
     start = board_to_tuple(start_board)
@@ -85,91 +72,154 @@ def bfs(start_board, goal_board):
 
     return None, len(visited)
 
-def dfs(start_board, goal_board, max_depth=50):
-    start = board_to_tuple(start_board)
-    goal = board_to_tuple(goal_board)
-    zero_pos = find_zero(start_board)
+def dfs(state, zero_pos, goal, depth, path, visited):
+    if depth > MAX_DEPTH:
+        return None
 
-    stack = [(start, zero_pos, [])]
-    visited = set()
-    visited.add(start)
+    if state == goal:
+        return path
 
-    while stack:
-        state, (zr, zc), path = stack.pop()
+    visited.add(state)
+    zr, zc = zero_pos
 
-        if state == goal:
-            return path, len(visited)
-
-        if len(path) >= max_depth:
+    for move, (dr, dc) in MOVES.items():
+        nr, nc = zr + dr, zc + dc
+        if not is_valid(nr, nc):
             continue
 
-        for move, (dr, dc) in MOVES.items():
-            nr, nc = zr + dr, zc + dc
-            if not is_valid(nr, nc):
-                continue
+        new_zero_idx = nr * cols + nc
+        zero_idx = zr * cols + zc
+        new_state = swap(state, zero_idx, new_zero_idx)
 
-            zero_idx = zr * cols + zc
-            new_zero_idx = nr * cols + nc
-            new_state = swap(state, zero_idx, new_zero_idx)
+        if new_state not in visited:
+            result = dfs(new_state, (nr, nc), goal, depth + 1, path + [move], visited)
+            if result:
+                return result
 
-            if new_state not in visited:
-                visited.add(new_state)
-                stack.append((new_state, (nr, nc), path + [move]))
+    visited.remove(state)
+    return None
 
-    return None, len(visited)
+def manhattan_distance(board, goal):
+    distance = 0
+    goal_positions = {num: (r, c) for r, row in enumerate(goal) for c, num in enumerate(row)}
 
-def astar(start_board, goal_board, heuristic_fn):
+    for r in range(rows):
+        for c in range(cols):
+            val = board[r][c]
+            if val != 0:
+                gr, gc = goal_positions[val]
+                distance += abs(r - gr) + abs(c - gc)
+    return distance
+
+def hamming_distance(board, goal):
+    count = 0
+    for r in range(rows):
+        for c in range(cols):
+            if board[r][c] != 0 and board[r][c] != goal[r][c]:
+                count += 1
+    return count
+
+def astar(start_board, goal_board, heuristic='manhattan'):
     start = board_to_tuple(start_board)
     goal = board_to_tuple(goal_board)
     zero_pos = find_zero(start_board)
 
-    heap = [(heuristic_fn(start, goal), 0, start, zero_pos, [])]
+    heap = []
+    g_score = {start: 0}
+
+    if heuristic == 'manhattan':
+        h = manhattan_distance(start_board, goal_board)
+    elif heuristic == 'hamming':
+        h = hamming_distance(start_board, goal_board)
+    else:
+        raise ValueError("Unsupported heuristic")
+
+    heapq.heappush(heap, (h, 0, start, zero_pos, []))
     visited = set()
-    visited.add(start)
 
     while heap:
-        est_total_cost, cost_so_far, state, (zr, zc), path = heapq.heappop(heap)
+        f, g, state, (zr, zc), path = heapq.heappop(heap)
 
         if state == goal:
             return path, len(visited)
+
+        if state in visited:
+            continue
+        visited.add(state)
 
         for move, (dr, dc) in MOVES.items():
             nr, nc = zr + dr, zc + dc
             if not is_valid(nr, nc):
                 continue
 
-            zero_idx = zr * cols + zc
             new_zero_idx = nr * cols + nc
+            zero_idx = zr * cols + zc
             new_state = swap(state, zero_idx, new_zero_idx)
 
-            if new_state not in visited:
-                visited.add(new_state)
-                new_cost = cost_so_far + 1
-                est_total = new_cost + heuristic_fn(new_state, goal)
-                heapq.heappush(heap, (est_total, new_cost, new_state, (nr, nc), path + [move]))
+            if new_state in visited:
+                continue
+
+            new_g = g + 1
+            if new_state not in g_score or new_g < g_score[new_state]:
+                g_score[new_state] = new_g
+                board_2d = [list(new_state[i * cols:(i + 1) * cols]) for i in range(rows)]
+
+                if heuristic == 'manhattan':
+                    h = manhattan_distance(board_2d, goal_board)
+                elif heuristic == 'hamming':
+                    h = hamming_distance(board_2d, goal_board)
+
+                heapq.heappush(heap, (new_g + h, new_g, new_state, (nr, nc), path + [move]))
 
     return None, len(visited)
 
-def solve(board, goal, algorithm='bfs', heuristic='manhattan'):
-    if algorithm == 'bfs':
-        return bfs(board, goal)
-    elif algorithm == 'dfs':
-        return dfs(board, goal, max_depth=80)
-    elif algorithm == 'astar':
-        if heuristic == 'manhattan':
-            return astar(board, goal, manhattan_distance)
-        elif heuristic == 'hamming':
-            return astar(board, goal, hamming_distance)
-        else:
-            raise ValueError("Nieznana heurystyka: wybierz 'manhattan' lub 'hamming'")
+def solve(board, goal, method='bfs'):
+    if method == 'dfs':
+        start = board_to_tuple(board)
+        goal_tuple = board_to_tuple(goal)
+        zero_pos = find_zero(board)
+        visited = set()
+        path = dfs(start, zero_pos, goal_tuple, 0, [], visited)
+        return path, len(visited)
+    elif method == 'astar':
+        return astar(board, goal, heuristic='manhattan')
+    elif method == 'astar_hamming':
+        return astar(board, goal, heuristic='hamming')
     else:
-        raise ValueError("Nieznany algorytm: wybierz 'bfs', 'dfs' lub 'astar'")
+        return bfs(board, goal)
 
+# Run all solvers
 start_time = time.time()
-solution, visited_count = solve(start_board, goal_board, algorithm='astar', heuristic='manhattan')
+solution_dfs, visited_dfs = solve(start_board, goal_board, method='dfs')
 end_time = time.time()
 
-print("Rozwiązanie:", solution)
-print("Długość ścieżki:", len(solution) if solution else 0)
-print("Liczba odwiedzonych stanów:", visited_count)
-print("Czas wykonania: %.4f sekundy" % (end_time - start_time))
+start_time2 = time.time()
+solution_bfs = solve(start_board, goal_board, method='bfs')
+end_time2 = time.time()
+
+start3 = time.time()
+solution_astar = solve(start_board, goal_board, method='astar')
+end_time3 = time.time()
+start4 = time.time()
+solution_astar_hamming = solve(start_board, goal_board, method='astar_hamming')
+end_time4 = time.time()
+
+print("DFS:", solution_dfs)
+print("DFS path length:", len(solution_dfs) if solution_dfs else 0)
+print("DFS visited states:", visited_dfs)
+print("DFS time: %.4f seconds" % (end_time - start_time))
+
+print("\nBFS:", solution_bfs[0])
+print("BFS path length:", len(solution_bfs[0]) if solution_bfs[0] else 0)
+print("BFS visited states:", solution_bfs[1])
+print("BFS time: %.4f seconds" % (end_time2 - start_time2))
+
+print("\nA* (Manhattan):", solution_astar[0])
+print("A* Manhattan path length:", len(solution_astar[0]) if solution_astar[0] else 0)
+print("A* Manhattan visited states:", solution_astar[1])
+print("A* Manhatan time: ", end_time3 - start3 )
+
+print("\nA* (Hamming):", solution_astar_hamming[0])
+print("A* Hamming path length:", len(solution_astar_hamming[0]) if solution_astar_hamming[0] else 0)
+print("A* Hamming visited states:", solution_astar_hamming[1])
+print("A* Hamming time: ", end_time4 - start4 )
